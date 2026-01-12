@@ -28,6 +28,7 @@ import openpi.training.misc.roboarena_config as roboarena_config
 import openpi.training.optimizer as _optimizer
 import openpi.training.weight_loaders as weight_loaders
 import openpi.transforms as _transforms
+import openpi.policies.dexora_policy as dexora_policy
 
 ModelType: TypeAlias = _model.ModelType
 # Work around a tyro issue with using nnx.filterlib.Filter directly.
@@ -184,7 +185,8 @@ class DataConfigFactory(abc.ABC):
             repo_id=repo_id,
             asset_id=asset_id,
             norm_stats=self._load_norm_stats(epath.Path(self.assets.assets_dir or assets_dirs), asset_id),
-            use_quantile_norm=model_config.model_type != ModelType.PI0,
+            #use_quantile_norm=model_config.model_type != ModelType.PI0,
+            use_quantile_norm=False,
         )
 
     def _load_norm_stats(self, assets_dir: epath.Path, asset_id: str | None) -> dict[str, _transforms.NormStats] | None:
@@ -461,6 +463,45 @@ class LeRobotDROIDDataConfig(DataConfigFactory):
             model_transforms=model_transforms,
         )
 
+@dataclasses.dataclass(frozen=True)
+class LeRobotDexoraDataConfig(DataConfigFactory):
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig)-> DataConfig:
+        # Create repack transform to map dataset keys to expected format
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "image_front": "image_front",
+                        "image_right": "image_right",
+                        "image_left": "image_left",
+                        "state": "state",
+                        "actions": "actions",  
+                        "prompt": "prompt"                        
+                    }
+                )
+            ]
+        )
+        
+        # Create data transforms using Dexora-specific transforms
+        data_transforms = _transforms.Group(
+            inputs=[
+                dexora_policy.DexoraInputs(
+                     action_dim=model_config.action_dim, model_type=model_config.model_type
+                )
+            ],
+            outputs=[dexora_policy.DexoraOutputs()],
+        )
+        
+        # Model transforms (tokenization, etc.)
+        model_transforms = ModelTransformFactory()(model_config)
+        
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
 
 @dataclasses.dataclass(frozen=True)
 class TrainConfig:
@@ -503,7 +544,7 @@ class TrainConfig:
     # Random seed that will be used by random generators during training.
     seed: int = 42
     # Global batch size.
-    batch_size: int = 32
+    batch_size: int = 1
     # Number of workers to use for the data loader. Increasing this number will speed up data loading but
     # will increase memory and CPU usage.
     num_workers: int = 2
@@ -554,6 +595,7 @@ class TrainConfig:
     def __post_init__(self) -> None:
         if self.resume and self.overwrite:
             raise ValueError("Cannot resume and overwrite at the same time.")
+
 
 
 # Use `get_config` if you need to get a config by name in your code.
@@ -904,7 +946,7 @@ _CONFIGS = [
         ),
         data=LeRobotDROIDDataConfig(
             # Replace with your custom DROID LeRobot dataset repo id.
-            repo_id="your_hf_username/my_droid_dataset",
+            repo_id="weiyi/dexora_dataset",
             base_config=DataConfig(prompt_from_task=True),
             assets=AssetsConfig(
                 # Important: reuse the original DROID norm stats during fine-tuning!
@@ -929,6 +971,66 @@ _CONFIGS = [
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
         num_train_steps=20_000,
+    ),
+    #
+    # Fine-tuning Dexora configs.
+    #
+    TrainConfig(
+        name="pi0_dexora",
+        model=pi0_config.Pi0Config(
+            action_dim=27,  
+            action_horizon=10,
+        ),
+        data=LeRobotDexoraDataConfig(
+            repo_id="weiyi/dexora_dataset",  
+            assets=AssetsConfig(
+                assets_dir="gs://openpi-assets/checkpoints/pi0_base/assets",
+                asset_id="dexora",  # Need to create norm stats for Dexora
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        batch_size=16,
+        fsdp_devices=1,
+    ),
+    TrainConfig(
+        name="pi05_dexora",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_dim=27,
+            action_horizon=15,
+        ),
+        data=LeRobotDexoraDataConfig(
+            repo_id="weiyi/dexora_data",
+            base_config=DataConfig(
+                prompt_from_task=True,
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=30_000,
+        batch_size=32,
+        fsdp_devices=1,
+    ),
+    TrainConfig(
+        name="pi05_dexora_test",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_dim=32,
+            action_horizon=15,
+        ),
+        data=LeRobotDexoraDataConfig(
+            repo_id="weiyi/dexora_close_open_drawer",
+            base_config=DataConfig(
+                prompt_from_task=True,
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/qiyuan_research_vepfs_001/weiyi/checkpoints/pi05_base/params"),
+        num_train_steps=30_000,
+        batch_size=16,
+        fsdp_devices=1,
     ),
     #
     # Debugging configs.

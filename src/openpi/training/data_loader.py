@@ -56,6 +56,8 @@ class TransformedDataset(Dataset[T_co]):
         self._transform = _transforms.compose(transforms)
 
     def __getitem__(self, index: SupportsIndex) -> T_co:
+        # print(self._dataset[index])
+        # exit()
         return self._transform(self._dataset[index])
 
     def __len__(self) -> int:
@@ -538,3 +540,4 @@ class DataLoaderImpl(DataLoader):
     def __iter__(self):
         for batch in self._data_loader:
             yield _model.Observation.from_dict(batch), batch["actions"]
+            
