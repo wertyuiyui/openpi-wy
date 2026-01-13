@@ -43,11 +43,10 @@ KEEP_INDICES = np.array([
 def make_dexora_example() -> dict:
     """Creates a random input example for the Dexora policy."""
     return {
-        "observation/state": np.random.rand(39),
-        "observation/images/front": np.random.randint(256, size=(480, 640, 3), dtype=np.uint8),
-        "observation/images/wrist_left": np.random.randint(256, size=(480, 640, 3), dtype=np.uint8),
-        "observation/images/wrist_right": np.random.randint(256, size=(480, 640, 3), dtype=np.uint8),
-        "observation/images/top": np.random.randint(256, size=(480, 640, 3), dtype=np.uint8),
+        "state": np.random.rand(39),
+        "image_front": np.random.randint(256, size=(480, 640, 3), dtype=np.uint8),
+        "image_left": np.random.randint(256, size=(480, 640, 3), dtype=np.uint8),
+        "image_right": np.random.randint(256, size=(480, 640, 3), dtype=np.uint8),
         "prompt": "do something",
     }
 
